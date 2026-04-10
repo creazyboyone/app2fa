@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo init:*)",
+      "Bash(cargo check:*)",
+      "Bash(curl -o /dev/null https://example.com)",
+      "Bash(curl -L -o \"E:/vibe_code/app2fa/icons/icon.ico\" \"https://upload.wikimedia.org/wikipedia/commons/7/75/Icon_application_generic.svg\")",
+      "Bash(printf '\\\\x00\\\\x00\\\\x01\\\\x00\\\\x01\\\\x00\\\\x20\\\\x00\\\\x20\\\\x00')",
+      "Bash(printf '\\\\x00\\\\x00\\\\x01\\\\x00\\\\x00\\\\x00')",
+      "Bash(printf '\\\\x68\\\\x01\\\\x00\\\\x00\\\\x16\\\\x00\\\\x00\\\\x00')",
+      "Bash(cat)",
+      "Bash(python3 /tmp/create_icon.py)",
+      "Bash(xxd -r -p echo \"PNG file created:\" ls -la icon.png file icon.png)",
+      "Bash(node -e ':*)",
+      "Bash(cargo clean:*)",
+      "Bash(cargo doc:*)"
+    ]
+  }
+}

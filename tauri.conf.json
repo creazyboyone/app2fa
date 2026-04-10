@@ -1,0 +1,34 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "TOTP Manager",
+  "version": "1.0.0",
+  "identifier": "com.totp.manager",
+  "build": {
+    "frontendDist": "dist"
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/icon.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "targets": ["nsis", "app"]
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "2FA Key Manager",
+        "width": 900,
+        "height": 650,
+        "resizable": true,
+        "center": true,
+        "fullscreen": false
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self' 'https://cdn.jsdelivr.net'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; media-src 'self'; camera *; microphone *"
+    }
+  }
+}

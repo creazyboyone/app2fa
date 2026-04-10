@@ -1,0 +1,33 @@
+[package]
+name = "totp-manager"
+version = "1.0.0"
+description = "Windows 2FA (TOTP) Key Manager"
+edition = "2021"
+rust-version = "1.75"
+
+[dependencies]
+tauri = { version = "2", features = [] }
+totp-rs = { version = "5", features = ["otpauth"] }
+rxing = "0.5"
+image = "0.24"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+tauri-plugin-opener = "2"
+base64 = "0.22"
+zeroize = "1.8"
+base32 = "0.5.1"
+
+[target.'cfg(windows)'.dependencies]
+winit = "0.29"
+windows = { version = "0.58", features = [
+  "Security_Credentials_UI",
+  "Win32_Security_Cryptography",
+] }
+
+[features]
+default = []
+skip-windows-hello = []  # Development only - remove in production
+
+[build-dependencies]
+tauri-build = "2"

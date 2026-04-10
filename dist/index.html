@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>2FA Key Manager</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <!-- 加载状态 -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="spinner"></div>
+            <p>加载中...</p>
+        </div>
+
+        <!-- Windows Hello 未设置提示 -->
+        <div class="error-overlay hidden" id="helloErrorOverlay">
+            <div class="error-content">
+                <h2>⚠️ Windows Hello 未配置</h2>
+                <p>无法找到可用的 Windows Hello 验证方式。</p>
+                <p>请确保已设置 PIN、指纹或面部识别，然后重新运行程序。</p>
+                <button onclick="window.close()" class="btn-close">退出程序</button>
+            </div>
+        </div>
+
+        <!-- 主界面 -->
+        <main id="mainView">
+            <header class="app-header">
+                <h1>🔐 2FA Key Manager</h1>
+                <button onclick="showAddAccount()" class="btn-add">+ 添加账户</button>
+            </header>
+
+            <div id="accountList" class="account-list"></div>
+        </main>
+
+        <!-- 添加账户界面 -->
+        <section id="addAccountView" class="view hidden">
+            <header class="section-header">
+                <h2>添加新账户</h2>
+                <button onclick="showMain()" class="btn-close-circle">×</button>
+            </header>
+
+            <div class="tabs">
+                <button class="tab active" data-tab="manual">手动输入</button>
+                <button class="tab" data-tab="image">导入图片</button>
+                <button class="tab" data-tab="camera">摄像头扫描</button>
+            </div>
+
+            <!-- 手动输入 -->
+            <form id="manualForm" class="tab-content active">
+                <div class="form-group">
+                    <label>账户名称 *</label>
+                    <input type="text" id="accountName" required placeholder="例如：GitHub, Google">
+                </div>
+                <div class="form-group">
+                    <label>服务商 (可选)</label>
+                    <input type="text" id="issuer" placeholder="例如：github.com">
+                </div>
+                <div class="form-group">
+                    <label>Base32 密钥 *</label>
+                    <input type="text" id="secretKey" required autocomplete="off"
+                           placeholder="例如：JBSWY3DPEHPK3PXP (自动去除空格/横线)"
+                           pattern="[A-Za-z0-9\s-]+">
+                </div>
+                <button type="submit" class="btn-primary">保存账户</button>
+            </form>
+
+            <!-- 图片导入 -->
+            <div id="imageForm" class="tab-content hidden">
+                <p class="hint">选择包含 otpauth:// 二维码的图片文件</p>
+                <button id="qrFileInputBtn" class="btn-primary">从图片导入</button>
+            </div>
+
+            <!-- 摄像头扫描 -->
+            <div id="cameraForm" class="tab-content hidden">
+                <video id="cameraVideo" autoplay playsinline muted></video>
+                <canvas id="qrCanvas" style="display:none;"></canvas>
+                <button onclick="startCamera()" class="btn-primary">开启摄像头</button>
+            </div>
+
+            <!-- 错误提示 -->
+            <p class="error-message hidden" id="errorMsg"></p>
+        </section>
+    </div>
+
+    <!-- 复制成功提示 -->
+    <div class="toast hidden" id="copyToast">✓ 已复制到剪贴板</div>
+
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <script type="module" src="app.js"></script>
+</body>
+</html>
