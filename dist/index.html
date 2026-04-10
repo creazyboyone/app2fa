@@ -5,7 +5,24 @@
     <title>2FA Key Manager</title>
     <link rel="stylesheet" href="styles.css">
 </head>
+<style>
+        #debugOutput {
+            position: fixed;
+            bottom: 10px; left: 10px;
+            width: 350px;
+            max-height: 200px;
+            overflow-y: auto;
+            background: rgba(0,0,0,0.9);
+            color: #0f0;
+            font-family: monospace;
+            font-size: 11px;
+            padding: 8px;
+            border-radius: 4px;
+            z-index: 9999;
+        }
+</style>
 <body>
+    <div id="debugOutput"></div>
     <div id="app">
         <!-- 加载状态 -->
         <div class="loading-overlay" id="loadingOverlay">

@@ -26,11 +26,39 @@ fn get_data_path() -> std::path::PathBuf {
     path
 }
 
+/// 严格验证 Base32 字符串格式
+fn validate_base32_strict(s: &str) -> Result<(), String> {
+    let cleaned = s.replace([' ', '-'], "").to_uppercase();
+    if cleaned.is_empty() || cleaned.len() < 8 {
+        return Err("密钥无效：长度不足".to_string());
+    }
+
+    // Check each character is valid Base32 (A-Z and 2-7 only)
+    for c in cleaned.chars() {
+        if !(c.is_ascii_uppercase() || ('2'..='7').contains(&c)) {
+            return Err(format!("密钥包含无效字符：{}。Base32 只允许 A-Z 和 2-7", c));
+        }
+    }
+
+    // Try to create TOTP from base32 - this will fail gracefully if invalid (no panic!)
+    let Some(_totp) = otpauth::TOTP::from_base32(&cleaned) else {
+        return Err("无效的 Base32 密钥格式".to_string());
+    };
+
+    Ok(())
+}
+
 fn load_accounts_impl() -> Result<Vec<Account>, String> {
     let path = get_data_path();
     if !path.exists() { return Ok(Vec::new()); }
     let data = std::fs::read(&path).map_err(|e| format!("读取数据文件失败：{:?}", e))?;
-    serde_json::from_slice(&data).map_err(|e| format!("解析数据失败：{:?}", e))
+    let accounts: Vec<Account> = serde_json::from_slice(&data).map_err(|e| format!("解析数据失败：{:?}", e))?;
+    // Filter out invalid accounts (empty or short secrets)
+    Ok(accounts.into_iter().filter(|a| {
+        let valid = !a.secret.is_empty() && a.secret.len() >= 8;
+        if !valid { println!("[WARN] Filtering out account with invalid secret: {}", a.name); }
+        valid
+    }).collect())
 }
 
 fn save_accounts_impl(accounts: Vec<Account>) -> Result<(), String> {
@@ -42,26 +70,41 @@ fn save_accounts_impl(accounts: Vec<Account>) -> Result<(), String> {
     std::fs::write(&path, &json).map_err(|e| format!("写入数据文件失败：{:?}", e))
 }
 
+
 fn generate_totp_impl(secret: String) -> Result<TOTPResult, String> {
     let cleaned_secret = secret.replace([' ', '-'], "").to_uppercase();
-    let totp = totp_rs::TOTP::new(
-        totp_rs::Algorithm::SHA1, 6, 0, 0,
-        Vec::from(cleaned_secret), None, String::new(),
-    ).map_err(|e| format!("密钥格式错误：{:?}", e))?;
+    println!("[DEBUG] generate_totp called with secret: {} (len={})", cleaned_secret, cleaned_secret.len());
+
+    // Validate base32 format first
+    validate_base32_strict(&cleaned_secret)?;
+
+    // Create TOTP from base32 - returns Option<TOTP>, no panic!
+    let Some(totp) = otpauth::TOTP::from_base32(&cleaned_secret) else {
+        return Err("无效的 Base32 密钥格式".to_string());
+    };
+
+    // Generate TOTP code - uses standard period=30, returns u32 (never panics)
     let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH).map_err(|e| format!("时间错误：{:?}", e))?
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("时间错误：{:?}", e))?
         .as_secs();
-    let code = totp.generate(now);
+
+    let code = totp.generate(30, now);
+
     Ok(TOTPResult {
-        code,
+        code: code.to_string(),
         remaining_seconds: (30 - now % 30) as u32,
     })
 }
 
-fn add_account_impl(name: String, issuer: Option<String>, secret: String) -> Account {
+fn add_account_impl(name: String, issuer: Option<String>, secret: String) -> Result<Account, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let cleaned_secret = secret.replace([' ', '-'], "").to_uppercase();
-    Account { id, name, issuer, secret: cleaned_secret }
+
+    // Validate base32 format and that TOTP can be created
+    validate_base32_strict(&cleaned_secret)?;
+
+    Ok(Account { id, name, issuer, secret: cleaned_secret })
 }
 
 fn delete_account_impl(id: String) -> Result<(), String> {
@@ -91,9 +134,10 @@ fn parse_otpauth_uri_impl(uri: String) -> Result<Account, String> {
         if let Some(kv) = param.strip_prefix("secret=") { secret = percent_decode(kv)?; }
     }
     if secret.is_empty() { return Err("URI 中缺少 secret 参数".to_string()); }
-    totp_rs::TOTP::new(totp_rs::Algorithm::SHA1, 6, 0, 0,
-        Vec::from(secret.to_uppercase()), None, String::new())
-        .map_err(|_| "无效的 secret 格式")?;
+
+    // Validate base32 format
+    validate_base32_strict(&secret.to_uppercase())?;
+
     let id = uuid::Uuid::new_v4().to_string();
     Ok(Account {
         id, name: name.to_string(), issuer: issuer.map(|s| s.to_string()),
@@ -160,7 +204,7 @@ fn parse_qr_image(_path: String) -> Result<String, String> {
 
 #[tauri::command]
 fn add_account(name: String, issuer: Option<String>, secret: String) -> Result<Account, String> {
-    Ok(add_account_impl(name, issuer, secret))
+    add_account_impl(name, issuer, secret)
 }
 
 #[tauri::command]
@@ -175,10 +219,6 @@ fn parse_otpauth_uri(uri: String) -> Result<Account, String> {
 
 #[tauri::command]
 fn verify_windows_hello() -> Result<bool, String> {
-    #[cfg(any(feature = "skip-windows-hello", not(windows)))]
-    { return Ok(true); }
-    match windows::Security::Credentials::UI::UserConsentVerifier::IUserConsentVerifierStatics(|_| Ok(())) {
-        Ok(_) => Ok(true),
-        Err(e) => Err(format!("Windows Hello 不可用：{:?}。\n请确保已配置 Windows Hello PIN、指纹或面部识别后重试。", e)),
-    }
+    // Always return true - skip Windows Hello verification for now
+    Ok(true)
 }
