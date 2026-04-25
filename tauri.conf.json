@@ -20,11 +20,18 @@
     "windows": [
       {
         "title": "2FA Key Manager",
-        "width": 900,
-        "height": 650,
+        "width": 560,
+        "height": 620,
+        "minWidth": 450,
+        "minHeight": 500,
+        "maxWidth": 650,
+        "maxHeight": 900,
         "resizable": true,
         "center": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "maximizable": false,
+        "decorations": true,
+        "alwaysOnTop": false
       }
     ],
     "security": {

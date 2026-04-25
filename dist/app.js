@@ -1,31 +1,10 @@
-// ==================== 调试日志（同时显示在页面上）====================
-
-const debugOutput = document.getElementById('debugOutput');
-
-function log(...args) {
-    const msg = args.map(a => typeof a === 'string' ? a : JSON.stringify(a)).join(' ');
-    console.log(msg);
-    if (debugOutput) {
-        const line = document.createElement('div');
-        line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
-        debugOutput.appendChild(line);
-        debugOutput.scrollTop = debugOutput.scrollHeight;
-    }
-}
-
-log('[APP] app.js loaded');
-log('[APP] window.__TAURI__ exists:', !!window.__TAURI__);
-
 // ==================== Tauri invoke ====================
 let invoke;
 try {
-    log('[APP] window.__TAURI__ =', JSON.stringify(window.__TAURI__));
     if (typeof window.__TAURI__ !== 'undefined') {
         const tauriCore = window.__TAURI__.core;
-        log('[APP] window.__TAURI__.core =', tauriCore);
         if (tauriCore && typeof tauriCore.invoke === 'function') {
             invoke = tauriCore.invoke;
-            log('[APP] Tauri invoke bound successfully');
         } else {
             throw new Error('Tauri core not available or missing invoke method');
         }
@@ -33,7 +12,6 @@ try {
         throw new Error('window.__TAURI__ is undefined');
     }
 } catch (e) {
-    log('[APP] Failed to bind Tauri invoke:', e);
     invoke = async () => {
         throw new Error('Tauri not initialized');
     };
@@ -46,18 +24,13 @@ let totpTimers = new Map();
 // ==================== 初始化 ===========================
 
 async function init() {
-    log('[INIT] TOTP Manager initializing...');
-
-    // Windows Hello 验证（前端侧检查）
     try {
-        log('[INIT] Calling verify_windows_hello...');
         const verified = await invoke('verify_windows_hello');
         if (!verified) {
             showErrorOverlay("Windows Hello 未配置或验证失败。请设置 PIN、指纹或面部识别后重试。");
             return;
         }
     } catch (error) {
-        console.error("Windows Hello error:", error);
         showErrorOverlay(error.message || "Windows Hello 验证失败。程序即将退出。");
         setTimeout(() => window.close(), 2000);
         return;
@@ -81,20 +54,11 @@ function showErrorOverlay(message) {
 // ==================== 账户加载与渲染 ====================
 
 async function loadAndRenderAccounts() {
-    log('[LOAD] Calling load_accounts...');
     try {
         let loadedAccounts = await invoke('load_accounts');
-        log('[LOAD] Received', loadedAccounts.length, 'accounts from backend:', JSON.stringify(loadedAccounts));
-        // Filter out invalid accounts (empty or short secrets)
-        accounts = loadedAccounts.filter(a => {
-            const valid = a && a.secret && a.secret.length >= 8;
-            if (!valid) log('[LOAD] Filtering invalid account:', a?.name, 'secret len:', a?.secret?.length);
-            return valid;
-        });
-        log('[LOAD] Loaded', accounts.length, 'valid accounts');
+        accounts = loadedAccounts.filter(a => a && a.secret && a.secret.length >= 8);
         renderAccountList();
     } catch (error) {
-        console.error("Failed to load accounts:", error);
         alert("无法加载账户列表：" + error.message);
     }
 }
@@ -109,19 +73,27 @@ function renderAccountList() {
 
     container.innerHTML = accounts.map(account => `
         <div class="account-card" data-id="${account.id}">
-            <span class="account-name">
-                ${escapeHtml(account.name)}
-                ${account.issuer ? `<small style="color:#565f89"> (${escapeHtml(account.issuer)})</small>` : ''}
-            </span>
+            <div class="account-info">
+                ${account.issuer ? `<div class="account-issuer">${escapeHtml(account.issuer)}</div>` : ''}
+                <div class="account-name">${escapeHtml(account.name)}</div>
+            </div>
             <div class="account-totp" data-secret="${account.secret}" onclick="copyTOTP(this)">
-                --:--:--
+                <span class="totp-progress"></span>
+                <span class="totp-text">------</span>
             </div>
-            <div class="progress-bar-container">
-                <div class="progress-bar-fill" style="width: 0%"></div>
-            </div>
-            <button class="delete-btn" title="删除账户">🗑️</button>
+            <button class="delete-btn" title="删除">×</button>
         </div>
     `).join('');
+
+    // 滚动条显示/隐藏
+    let scrollTimeout;
+    container.addEventListener('scroll', () => {
+        container.classList.add('scrolling');
+        clearTimeout(scrollTimeout);
+        scrollTimeout = setTimeout(() => {
+            container.classList.remove('scrolling');
+        }, 1000);
+    });
 
     accounts.forEach(account => {
         startTOTPRefresh(account);
@@ -129,22 +101,14 @@ function renderAccountList() {
 }
 
 async function startTOTPRefresh(account) {
-    if (!account?.secret || account.secret.length < 8) {
-        log('[TOTP] Skipping invalid account:', account?.name);
-        return;
-    }
+    if (!account?.secret || account.secret.length < 8) return;
     const totpEl = document.querySelector(`.account-totp[data-secret="${account.secret}"]`);
-    if (!totpEl) {
-        log('[TOTP] No DOM element found for account, skipping');
-        return;  // Don't proceed if no element exists
-    }
-
-    await refreshSingleTOTP(account, totpEl);
+    if (!totpEl) return;
 
     await refreshSingleTOTP(account, totpEl);
 
     totpTimers.set(account.id, setInterval(() => {
-        refreshSingleTOTP(account, totpEl).catch(console.error);
+        refreshSingleTOTP(account, totpEl).catch(() => {});
     }, 1000));
 }
 
@@ -154,42 +118,42 @@ async function refreshSingleTOTP(account, element) {
 
         if (element && !document.contains(element)) return;
 
-        const formattedCode = result.code.match(/.{1,2}/g).join(':');
+        const textEl = element?.querySelector('.totp-text');
+        const progressEl = element?.querySelector('.totp-progress');
 
+        if (textEl) {
+            textEl.textContent = result.code;
+        }
         if (element) {
-            element.textContent = formattedCode;
             element.title = result.code;
         }
 
-        updateProgressBar(element?.parentElement, result.remaining_seconds);
+        // Update progress fill
+        if (progressEl) {
+            const percentage = ((result.remaining_seconds || 30) / 30) * 100;
+            progressEl.style.width = `${percentage}%`;
+        }
     } catch (error) {
-        console.error("Failed to generate TOTP:", error);
-        if (element) element.textContent = "ERROR";
-    }
-}
-
-function updateProgressBar(card, remainingSeconds) {
-    const bar = card?.querySelector('.progress-bar-fill');
-    if (bar && remainingSeconds !== undefined) {
-        const percentage = ((remainingSeconds || 30) / 30) * 100;
-        bar.style.width = `${percentage}%`;
+        const textEl = element?.querySelector('.totp-text');
+        if (textEl) textEl.textContent = "ERROR";
     }
 }
 
 // ==================== 复制到剪贴板 ====================
 
 async function copyTOTP(element) {
+    const rawCode = element.title || element.querySelector('.totp-text')?.textContent || '';
+
     try {
-        const rawCode = element.title || element.textContent.replace(/:/g, '');
-        await navigator.clipboard.writeText(rawCode);
-        showToast("✓ 已复制到剪贴板", 1500);
-    } catch (error) {
-        console.error("Failed to copy:", error);
-        element.select();
-        document.execCommand('copy');
+        await invoke('copy_to_clipboard', { text: rawCode });
         showToast("✓ 已复制", 1500);
+    } catch (e) {
+        showToast("复制失败: " + e.message, 2000);
     }
 }
+
+// 暴露到全局作用域
+window.copyTOTP = copyTOTP;
 
 function showToast(message, duration = 1500) {
     const toast = document.getElementById('copyToast');
@@ -201,24 +165,19 @@ function showToast(message, duration = 1500) {
 
 // ==================== 添加账户 ====================
 
-// Define and expose immediately for onclick handlers
 window.showAddAccount = function() {
-    log('[APP] showAddAccount called!');
     const mainView = document.getElementById('mainView');
     const addAccountView = document.getElementById('addAccountView');
-    log('[APP] mainView element:', !!mainView);
-    log('[APP] addAccountView element:', !!addAccountView);
-    if (mainView) { mainView.classList.add('hidden'); log('[APP] mainView hidden'); }
-    if (addAccountView) { addAccountView.classList.remove('hidden'); log('[APP] addAccountView shown'); }
+    if (mainView) mainView.classList.add('hidden');
+    if (addAccountView) addAccountView.classList.remove('hidden');
     selectTab('manual');
 };
 
 window.showMain = function() {
-    log('[APP] showMain called');
     const addAccountView = document.getElementById('addAccountView');
     const mainView = document.getElementById('mainView');
-    if (addAccountView) { addAccountView.classList.add('hidden'); }
-    if (mainView) { mainView.classList.remove('hidden'); }
+    if (addAccountView) addAccountView.classList.add('hidden');
+    if (mainView) mainView.classList.remove('hidden');
     stopCamera();
 };
 
@@ -237,9 +196,6 @@ function selectTab(tabName) {
 document.getElementById('manualForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
 
-    log('[FORM] 表单提交被触发');
-    log('[FORM] invoke function exists:', typeof invoke === 'function');
-
     const name = document.getElementById('accountName').value.trim();
     const issuer = document.getElementById('issuer').value.trim() || null;
     const secret = document.getElementById('secretKey').value.trim();
@@ -249,7 +205,6 @@ document.getElementById('manualForm')?.addEventListener('submit', async (e) => {
         return;
     }
 
-    // First check for invalid characters BEFORE filtering
     if (/[^A-Za-z2-7\s-]/.test(secret)) {
         showError("密钥包含无效字符。Base32 密钥只允许 A-Z、a-z、2-7、空格和横线");
         return;
@@ -261,48 +216,150 @@ document.getElementById('manualForm')?.addEventListener('submit', async (e) => {
         return;
     }
 
-    log('[FORM] cleanedSecret:', cleanedSecret, 'length:', cleanedSecret.length);
-
-    log('[FORM] 准备调用 add_account:', { name, issuer, secret: cleanedSecret });
+    // 去重检查
+    if (isAccountExists(cleanedSecret)) {
+        showError("该账户已存在");
+        return;
+    }
 
     try {
-        log('[FORM] Calling invoke(add_account)...');
         const newAccount = await invoke('add_account', { name, issuer, secret: cleanedSecret });
-        log('[FORM] add_account result:', JSON.stringify(newAccount));
 
-        // Validate the returned account before using it
         if (!newAccount || !newAccount.secret || newAccount.secret.length < 8) {
             throw new Error('后端返回的账户数据无效');
         }
 
-        log('[FORM] Calling invoke(generate_totp)...');
         await invoke('generate_totp', { secret: newAccount.secret });
 
         accounts.push(newAccount);
         startTOTPRefresh(newAccount);
 
-        log('[FORM] Calling invoke(save_accounts)...');
         await invoke('save_accounts', { accounts });
 
         renderAccountList();
         showMain();
         hideError();
         document.getElementById('manualForm').reset();
-        log('[FORM] 账户添加成功');
     } catch (error) {
-        log('[FORM] Error adding account:', error);
-        console.error("Failed to add account:", error);
         showError(error.message || "添加账户失败");
     }
 });
 
-// ==================== 图片导入（占位符）=====================
+// ==================== 图片导入 ====================
 
 async function importFromImage() {
-    showError("QR 图片导入功能正在开发中，请使用手动输入或摄像头扫描");
+    try {
+        const input = document.getElementById('qrFileInput');
+        if (!input || !input.files || input.files.length === 0) return;
+
+        const files = Array.from(input.files);
+        const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/bmp', 'image/gif'];
+        let importedCount = 0;
+        let skippedCount = 0;
+        let failedCount = 0;
+
+        for (const file of files) {
+            if (!allowedTypes.includes(file.type)) {
+                failedCount++;
+                continue;
+            }
+
+            try {
+                const dataUrl = await new Promise((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onload = () => resolve(reader.result);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+
+                const img = new Image();
+                await new Promise((resolve, reject) => {
+                    img.onload = resolve;
+                    img.onerror = reject;
+                    img.src = dataUrl;
+                });
+
+                const MAX_SIZE = 2048;
+                let w = img.width, h = img.height;
+                if (w > MAX_SIZE || h > MAX_SIZE) {
+                    const scale = MAX_SIZE / Math.max(w, h);
+                    w = Math.round(w * scale);
+                    h = Math.round(h * scale);
+                }
+
+                if (w < 10 || h < 10) {
+                    failedCount++;
+                    continue;
+                }
+
+                const canvas = document.getElementById('qrCanvas');
+                canvas.width = w;
+                canvas.height = h;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, w, h);
+
+                const imageData = ctx.getImageData(0, 0, w, h);
+
+                let code = null;
+                try {
+                    code = window.jsQR(imageData.data, imageData.width, imageData.height, {
+                        inversionAttempts: 'attemptBoth'
+                    });
+                } catch (e) {}
+
+                let qrData = code?.data;
+                if (!qrData) {
+                    try {
+                        qrData = await invoke('parse_qr_image', { dataUrl });
+                    } catch (e) {}
+                }
+
+                if (qrData) {
+                    const result = await processQRData(qrData, false);
+                    importedCount += result.imported;
+                    skippedCount += result.skipped;
+                    if (result.imported === 0 && result.skipped === 0) {
+                        failedCount++;
+                    }
+                } else {
+                    failedCount++;
+                }
+            } catch (e) {
+                failedCount++;
+            }
+        }
+
+        // 保存所有账户
+        if (importedCount > 0) {
+            await invoke('save_accounts', { accounts });
+        }
+
+        // 显示结果
+        if (importedCount > 0) {
+            renderAccountList();
+            showMain();
+            hideError();
+            let msg = `✓ 成功导入 ${importedCount} 个账户`;
+            if (skippedCount > 0) msg += `，${skippedCount} 个已存在跳过`;
+            if (failedCount > 0) msg += `，${failedCount} 个失败`;
+            showToast(msg, 2500);
+        } else if (skippedCount > 0) {
+            showToast(`所有账户已存在，跳过 ${skippedCount} 个`, 2000);
+        } else {
+            showError("未能识别任何有效的二维码");
+        }
+
+        // 重置文件输入
+        input.value = '';
+    } catch (error) {
+        showError(error.message || "读取图片失败");
+    }
 }
 
-document.getElementById('qrFileInputBtn')?.addEventListener('click', importFromImage);
+document.getElementById('qrFileInputBtn')?.addEventListener('click', () => {
+    document.getElementById('qrFileInput')?.click();
+});
+document.getElementById('qrFileInput')?.addEventListener('change', importFromImage);
 
 // ==================== 摄像头扫描 ====================
 
@@ -319,7 +376,6 @@ async function startCamera() {
         video.style.display = 'block';
         scanInterval = setInterval(scanFrame, 300);
     } catch (error) {
-        console.error("Camera error:", error);
         showError("无法访问摄像头：" + error.message);
     }
 }
@@ -352,37 +408,89 @@ async function scanFrame() {
         canvas.height = video.videoHeight;
         ctx.drawImage(video, 0, 0);
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = window.jsQR(imageData, { inversionAttempts: 'dontInvert' });
+        const code = window.jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: 'dontInvert'
+        });
 
         if (code) {
-            console.log("QR Code found:", code.data);
             stopCamera();
             await processScannedQR(code.data);
         }
     } catch (error) {}
 }
 
-async function processScannedQR(data) {
+// 检查账户是否已存在（基于 secret 去重）
+function isAccountExists(secret) {
+    return accounts.some(a => a.secret === secret);
+}
+
+// 处理 QR 数据，返回 { imported: number, skipped: number }
+async function processQRData(data, autoSave = true) {
     try {
+        // Google Authenticator 迁移
+        if (data.startsWith('otpauth-migration://offline?data=')) {
+            let migrationData = data.substring('otpauth-migration://offline?data='.length);
+            const migrationAccounts = await invoke('decode_migration_payload', { b64Data: migrationData });
+
+            if (migrationAccounts.length === 0) return { imported: 0, skipped: 0 };
+
+            let imported = 0, skipped = 0;
+            for (const ma of migrationAccounts) {
+                // 去重检查
+                if (isAccountExists(ma.secret_b32)) {
+                    skipped++;
+                    continue;
+                }
+
+                try {
+                    const account = await invoke('add_account', { name: ma.name, issuer: ma.issuer || null, secret: ma.secret_b32 });
+                    accounts.push(account);
+                    startTOTPRefresh(account);
+                    imported++;
+                } catch (e) {}
+            }
+
+            if (imported > 0 && autoSave) {
+                await invoke('save_accounts', { accounts });
+            }
+            return { imported, skipped };
+        }
+
+        // 标准 otpauth URI
         if (!data.startsWith('otpauth://')) {
-            showError("扫描的二维码不是有效的 otpauth URI");
-            return;
+            return { imported: 0, skipped: 0 };
         }
 
         const account = await invoke('parse_otpauth_uri', { uri: data });
-        await invoke('generate_totp', { secret: account.secret });
+
+        // 去重检查
+        if (isAccountExists(account.secret)) {
+            return { imported: 0, skipped: 1 };
+        }
 
         accounts.push(account);
         startTOTPRefresh(account);
-        await invoke('save_accounts', { accounts });
 
+        if (autoSave) {
+            await invoke('save_accounts', { accounts });
+        }
+        return { imported: 1, skipped: 0 };
+    } catch (error) {
+        return { imported: 0, skipped: 0 };
+    }
+}
+
+async function processScannedQR(data) {
+    const result = await processQRData(data, true);
+    if (result.imported > 0) {
         renderAccountList();
         showMain();
         hideError();
-        showToast("✓ 账户添加成功", 2000);
-    } catch (error) {
-        console.error("Failed to process QR:", error);
-        showError(error.message || "无法解析二维码内容");
+        showToast(result.imported > 1 ? `✓ 成功导入 ${result.imported} 个账户` : "✓ 账户添加成功", 2000);
+    } else if (result.skipped > 0) {
+        showToast("该账户已存在", 2000);
+    } else {
+        showError("无法解析二维码内容");
     }
 }
 
@@ -405,7 +513,6 @@ document.addEventListener('click', async (e) => {
             }
             renderAccountList();
         } catch (error) {
-            console.error("Failed to delete:", error);
             alert("删除失败：" + error.message);
         }
     }

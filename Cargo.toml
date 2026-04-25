@@ -9,11 +9,12 @@ rust-version = "1.75"
 tauri = { version = "2", features = [] }
 otpauth = "0.5"
 rxing = "0.5"
-image = "0.24"
+image = "0.25"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-opener = "2"
+tauri-plugin-clipboard-manager = "2"
 base64 = "0.22"
 zeroize = "1.8"
 base32 = "0.5.1"

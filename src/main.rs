@@ -16,6 +16,15 @@ pub struct TOTPResult {
     pub remaining_seconds: u32,
 }
 
+/// 从 protobuf 解码的迁移账户（secret 直接为 Base32 编码）
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MigrationAccount {
+    pub name: String,
+    pub issuer: Option<String>,
+    /// Base32-encoded secret (可直接用于 TOTP)
+    pub secret_b32: String,
+}
+
 // ==================== 业务逻辑（无宏）=====================
 
 fn get_data_path() -> std::path::PathBuf {
@@ -33,14 +42,12 @@ fn validate_base32_strict(s: &str) -> Result<(), String> {
         return Err("密钥无效：长度不足".to_string());
     }
 
-    // Check each character is valid Base32 (A-Z and 2-7 only)
     for c in cleaned.chars() {
         if !(c.is_ascii_uppercase() || ('2'..='7').contains(&c)) {
             return Err(format!("密钥包含无效字符：{}。Base32 只允许 A-Z 和 2-7", c));
         }
     }
 
-    // Try to create TOTP from base32 - this will fail gracefully if invalid (no panic!)
     let Some(_totp) = otpauth::TOTP::from_base32(&cleaned) else {
         return Err("无效的 Base32 密钥格式".to_string());
     };
@@ -53,11 +60,8 @@ fn load_accounts_impl() -> Result<Vec<Account>, String> {
     if !path.exists() { return Ok(Vec::new()); }
     let data = std::fs::read(&path).map_err(|e| format!("读取数据文件失败：{:?}", e))?;
     let accounts: Vec<Account> = serde_json::from_slice(&data).map_err(|e| format!("解析数据失败：{:?}", e))?;
-    // Filter out invalid accounts (empty or short secrets)
     Ok(accounts.into_iter().filter(|a| {
-        let valid = !a.secret.is_empty() && a.secret.len() >= 8;
-        if !valid { println!("[WARN] Filtering out account with invalid secret: {}", a.name); }
-        valid
+        !a.secret.is_empty() && a.secret.len() >= 8
     }).collect())
 }
 
@@ -70,29 +74,25 @@ fn save_accounts_impl(accounts: Vec<Account>) -> Result<(), String> {
     std::fs::write(&path, &json).map_err(|e| format!("写入数据文件失败：{:?}", e))
 }
 
-
 fn generate_totp_impl(secret: String) -> Result<TOTPResult, String> {
     let cleaned_secret = secret.replace([' ', '-'], "").to_uppercase();
-    println!("[DEBUG] generate_totp called with secret: {} (len={})", cleaned_secret, cleaned_secret.len());
-
-    // Validate base32 format first
     validate_base32_strict(&cleaned_secret)?;
 
-    // Create TOTP from base32 - returns Option<TOTP>, no panic!
     let Some(totp) = otpauth::TOTP::from_base32(&cleaned_secret) else {
         return Err("无效的 Base32 密钥格式".to_string());
     };
 
-    // Generate TOTP code - uses standard period=30, returns u32 (never panics)
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| format!("时间错误：{:?}", e))?
         .as_secs();
 
     let code = totp.generate(30, now);
+    // Ensure 6-digit code with leading zeros
+    let code_str = format!("{:06}", code);
 
     Ok(TOTPResult {
-        code: code.to_string(),
+        code: code_str,
         remaining_seconds: (30 - now % 30) as u32,
     })
 }
@@ -100,10 +100,7 @@ fn generate_totp_impl(secret: String) -> Result<TOTPResult, String> {
 fn add_account_impl(name: String, issuer: Option<String>, secret: String) -> Result<Account, String> {
     let id = uuid::Uuid::new_v4().to_string();
     let cleaned_secret = secret.replace([' ', '-'], "").to_uppercase();
-
-    // Validate base32 format and that TOTP can be created
     validate_base32_strict(&cleaned_secret)?;
-
     Ok(Account { id, name, issuer, secret: cleaned_secret })
 }
 
@@ -135,7 +132,6 @@ fn parse_otpauth_uri_impl(uri: String) -> Result<Account, String> {
     }
     if secret.is_empty() { return Err("URI 中缺少 secret 参数".to_string()); }
 
-    // Validate base32 format
     validate_base32_strict(&secret.to_uppercase())?;
 
     let id = uuid::Uuid::new_v4().to_string();
@@ -163,14 +159,234 @@ fn percent_decode(s: &str) -> Result<String, String> {
     Ok(result)
 }
 
+// ==================== Google Authenticator 迁移 payload 解码 ====================
+
+/// 将 raw secret bytes 编码为 Base32（无 padding）
+fn encode_secret_base32(secret: &[u8]) -> String {
+    base32::encode(base32::Alphabet::Rfc4648 { padding: false }, secret)
+        .to_uppercase()
+}
+
+/// 解码 Google Authenticator 迁移 payload（base64-encoded protobuf）
+fn decode_migration_payload_impl(b64_data: String) -> Result<Vec<MigrationAccount>, String> {
+    let b64_data = url_decode(&b64_data);
+
+    #[allow(deprecated)]
+    let raw = base64::decode(&b64_data).map_err(|e| format!("Base64 解码失败：{:?}", e))?;
+
+    let mut offset = 0usize;
+    let mut accounts = Vec::new();
+
+    while offset < raw.len() {
+        let (tag, new_off) = decode_varint(&raw, offset)?;
+        offset = new_off;
+
+        let field_num = (tag >> 3) as u32;
+        let wire_type = (tag & 7) as u8;
+
+        // Skip non-OtpParameters fields (version_number=2, batch_size=3, batch_index=4, batch_id=5)
+        if field_num != 1 {
+            match wire_type {
+                0 => {
+                    let (_, o) = decode_varint(&raw, offset)?;
+                    offset = o;
+                    continue;
+                }
+                2 => {
+                    let (len, o) = decode_varint(&raw, offset)?;
+                    offset = o + len as usize;
+                    continue;
+                }
+                _ => return Err(format!("未知 wire type={}，字段={}", wire_type, field_num)),
+            }
+        }
+
+        let (msg_len, new_offset) = decode_varint(&raw, offset)?;
+        offset = new_offset;
+
+        if offset + msg_len as usize > raw.len() {
+            return Err("protobuf 数据截断".to_string());
+        }
+
+        let msg_start = offset;
+        let otp = parse_otp_parameters(&raw[msg_start..msg_start + msg_len as usize])?;
+        offset = msg_start + msg_len as usize;
+
+        let secret_b32 = encode_secret_base32(&otp.secret);
+
+        accounts.push(MigrationAccount {
+            name: otp.name,
+            issuer: if otp.issuer.is_empty() { None } else { Some(otp.issuer) },
+            secret_b32,
+        });
+    }
+
+    if accounts.is_empty() {
+        return Err("payload 中未找到任何账户".to_string());
+    }
+
+    Ok(accounts)
+}
+
+/// URL-decode the base64 data from QR code (handles %xx escaping)
+fn url_decode(s: &str) -> String {
+    let mut result = Vec::new();
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(&s[i+1..i+3], 16) {
+                result.push(byte);
+                i += 3;
+                continue;
+            }
+        }
+        result.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&result).to_string()
+}
+
+/// 解码 varint，返回 (值, 新偏移量)
+fn decode_varint(data: &[u8], offset: usize) -> Result<(u64, usize), String> {
+    let mut result: u64 = 0;
+    let mut shift: u32 = 0;
+    let mut i = offset;
+
+    while i < data.len() {
+        let byte = data[i];
+        result |= ((byte & 0x7F) as u64) << shift;
+        i += 1;
+        if (byte & 0x80) == 0 {
+            return Ok((result, i));
+        }
+        shift += 7;
+        if shift > 63 {
+            return Err("varint 溢出".to_string());
+        }
+    }
+
+    Err("varint 未完整".to_string())
+}
+
+/// OtpParameters 的简化解析结果
+struct SimpleOtpParams {
+    secret: Vec<u8>,
+    name: String,
+    issuer: String,
+}
+
+/// 解析 OtpParameters 嵌套消息
+fn parse_otp_parameters(data: &[u8]) -> Result<SimpleOtpParams, String> {
+    let mut offset = 0usize;
+    let mut secret = Vec::new();
+    let mut name = String::new();
+    let mut issuer = String::new();
+
+    while offset < data.len() {
+        let (tag, new_offset) = decode_varint(data, offset)?;
+        offset = new_offset;
+
+        let field_num = (tag >> 3) as u32;
+        if field_num == 0 { return Err("无效字段号".to_string()); }
+
+        let wire_type = (tag & 7) as u8;
+
+        match field_num {
+            1 => { // bytes secret
+                if wire_type != 2 { return Err("secret 期望 length-delimited".to_string()); }
+                let (len, o) = decode_varint(data, offset)?;
+                offset = o;
+                if offset + len as usize > data.len() {
+                    return Err("数据截断".to_string());
+                }
+                secret.extend_from_slice(&data[offset..offset + len as usize]);
+                offset += len as usize;
+            }
+            2 => { // string name
+                if wire_type != 2 { return Err("name 期望 length-delimited".to_string()); }
+                let (len, o) = decode_varint(data, offset)?;
+                offset = o;
+                if offset + len as usize > data.len() {
+                    return Err("数据截断".to_string());
+                }
+                name.push_str(
+                    std::str::from_utf8(&data[offset..offset + len as usize])
+                        .map_err(|e| format!("name 解码失败：{:?}", e))?,
+                );
+                offset += len as usize;
+            }
+            3 => { // string issuer
+                if wire_type != 2 { return Err("issuer 期望 length-delimited".to_string()); }
+                let (len, o) = decode_varint(data, offset)?;
+                offset = o;
+                if offset + len as usize > data.len() {
+                    return Err("数据截断".to_string());
+                }
+                issuer.push_str(
+                    std::str::from_utf8(&data[offset..offset + len as usize])
+                        .map_err(|e| format!("issuer 解码失败：{:?}", e))?,
+                );
+                offset += len as usize;
+            }
+            _ => {
+                match wire_type {
+                    0 => {
+                        let (_, o) = decode_varint(data, offset)?;
+                        offset = o;
+                    }
+                    2 => {
+                        let (len, o) = decode_varint(data, offset)?;
+                        offset = o + len as usize;
+                    }
+                    _ => return Err(format!("未知 wire type={}，字段={}", wire_type, field_num)),
+                }
+            }
+        }
+    }
+
+    Ok(SimpleOtpParams { secret, name, issuer })
+}
+
+fn parse_qr_image_impl(data_url: String) -> Result<String, String> {
+    let b64 = if let Some(pos) = data_url.find(",") {
+        &data_url[pos + 1..]
+    } else {
+        &data_url
+    };
+
+    #[allow(deprecated)]
+    let img_bytes = base64::decode(b64).map_err(|e| format!("Base64 解码失败：{:?}", e))?;
+
+    let img = image::load_from_memory(&img_bytes).map_err(|e| format!("图片解析失败：{:?}", e))?;
+
+    let mut reader = rxing::qrcode::QRCodeReader::default();
+    let result = rxing::Reader::decode(
+        &mut reader,
+        &mut rxing::BinaryBitmap::new(rxing::common::HybridBinarizer::new(
+            rxing::BufferedImageLuminanceSource::new(img),
+        )),
+    )
+    .map_err(|e| format!("QR 码识别失败：{:?}", e))?;
+
+    let text = result.getText();
+    if text.is_empty() {
+        return Err("QR 码内容为空".to_string());
+    }
+
+    Ok(text.to_string())
+}
+
 // ==================== Tauri 应用入口 ====================
 
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
             load_accounts, save_accounts, generate_totp, parse_qr_image,
             add_account, delete_account, parse_otpauth_uri, verify_windows_hello,
+            decode_migration_payload, copy_to_clipboard,
         ])
         .setup(|_app| {
             println!("TOTP Manager 启动");
@@ -198,8 +414,8 @@ fn generate_totp(secret: String) -> Result<TOTPResult, String> {
 }
 
 #[tauri::command]
-fn parse_qr_image(_path: String) -> Result<String, String> {
-    Err("QR 图片导入功能正在开发中，请使用手动输入或摄像头扫描".to_string())
+fn parse_qr_image(data_url: String) -> Result<String, String> {
+    parse_qr_image_impl(data_url)
 }
 
 #[tauri::command]
@@ -219,6 +435,17 @@ fn parse_otpauth_uri(uri: String) -> Result<Account, String> {
 
 #[tauri::command]
 fn verify_windows_hello() -> Result<bool, String> {
-    // Always return true - skip Windows Hello verification for now
     Ok(true)
+}
+
+/// 解码 Google Authenticator 迁移 payload（base64-encoded protobuf）
+#[tauri::command]
+fn decode_migration_payload(b64_data: String) -> Result<Vec<MigrationAccount>, String> {
+    decode_migration_payload_impl(b64_data)
+}
+
+#[tauri::command]
+async fn copy_to_clipboard(app: tauri::AppHandle, text: String) -> Result<(), String> {
+    use tauri_plugin_clipboard_manager::ClipboardExt;
+    app.clipboard().write_text(&text).map_err(|e| format!("复制失败：{:?}", e))
 }

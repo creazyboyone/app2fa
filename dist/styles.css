@@ -11,6 +11,30 @@ body {
     min-height: 100vh;
 }
 
+/* 自定义滚动条 - 平时隐藏 */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+    transition: background 0.3s;
+}
+
+/* 滚动时显示滚动条 */
+.account-list.scrolling::-webkit-scrollbar-thumb {
+    background: #565f89;
+}
+
+.account-list.scrolling::-webkit-scrollbar-thumb:hover {
+    background: #7aa2f7;
+}
+
 #app {
     padding: 20px;
 }
@@ -70,7 +94,30 @@ body {
 }
 
 /* Buttons */
-.btn-add, .btn-primary {
+.btn-add {
+    width: 36px;
+    height: 36px;
+    background-color: #7aa2f7;
+    color: #1a1b26;
+    border: none;
+    padding: 0;
+    font-size: 1.5rem;
+    font-weight: 300;
+    border-radius: 50%;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+}
+
+.btn-add:hover {
+    background-color: #9cb9fc;
+    transform: scale(1.05);
+}
+
+.btn-primary {
     background-color: #7aa2f7;
     color: #1a1b26;
     border: none;
@@ -81,7 +128,7 @@ body {
     transition: background-color 0.2s, transform 0.1s;
 }
 
-.btn-add:hover, .btn-primary:hover {
+.btn-primary:hover {
     background-color: #5d86e3;
 }
 
@@ -104,8 +151,15 @@ body {
     display: flex;
     flex-direction: column;
     gap: 15px;
-    max-height: calc(100vh - 200px);
+    flex: 1;
     overflow-y: auto;
+    padding-right: 8px;
+}
+
+#mainView {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - 40px);
 }
 
 .account-card {
@@ -113,14 +167,28 @@ body {
     border-radius: 12px;
     padding: 20px;
     display: grid;
-    grid-template-columns: 1fr auto auto auto;
+    grid-template-columns: 1fr auto auto;
     align-items: center;
     gap: 15px;
 }
 
+.account-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.account-issuer {
+    font-size: 0.85rem;
+    color: #7aa2f7;
+    margin-bottom: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 .account-name {
-    font-size: 1.1rem;
-    font-weight: 600;
+    font-size: 1rem;
+    font-weight: 500;
     color: #c0caf5;
     white-space: nowrap;
     overflow: hidden;
@@ -128,47 +196,70 @@ body {
 }
 
 .account-totp {
+    position: relative;
     background-color: #1a1b26;
-    padding: 10px 18px;
-    border-radius: 8px;
-    font-family: 'Courier New', monospace;
-    font-size: 1.3rem;
+    padding: 12px 20px;
+    border-radius: 10px;
+    font-family: 'SF Mono', 'Consolas', 'Monaco', monospace;
+    font-size: 1.6rem;
+    font-weight: 600;
     letter-spacing: 4px;
     text-align: center;
     cursor: pointer;
-    user-select: all;
-    transition: background-color 0.2s;
+    color: #7aa2f7;
+    border: 1px solid #3b3d51;
+    overflow: hidden;
+    user-select: none;
+    transition: all 0.15s ease;
+    min-width: 130px;
 }
 
 .account-totp:hover {
-    background-color: #2a2b3d;
+    border-color: #7aa2f7;
+    box-shadow: 0 0 12px rgba(122, 162, 247, 0.3);
 }
 
-/* Progress Bar */
-.progress-bar-container {
-    width: 120px;
-    height: 6px;
-    background-color: #3b3d51;
-    border-radius: 3px;
-    overflow: hidden;
+.account-totp:active {
+    transform: scale(0.97);
+    background-color: #24283b;
 }
 
-.progress-bar-fill {
-    height: 100%;
-    background: linear-gradient(90deg, #7aa2f7, #bb9af7);
-    transition: width 0.3s linear;
+.totp-progress {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, #3d59a1 0%, #7aa2f7 100%);
+    opacity: 0.3;
+    transition: width 0.5s linear;
+    z-index: 0;
+}
+
+.totp-text {
+    position: relative;
+    z-index: 1;
 }
 
 .delete-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 10px;
-    font-size: 1rem;
+    width: 28px;
+    height: 28px;
+    font-size: 1.2rem;
     background: transparent;
     border: none;
+    border-radius: 50%;
     cursor: pointer;
+    color: #565f89;
+    transition: all 0.2s;
+    opacity: 0.5;
+}
+
+.delete-btn:hover {
+    background: rgba(247, 118, 142, 0.2);
     color: #f7768e;
+    opacity: 1;
 }
 
 /* Views */
