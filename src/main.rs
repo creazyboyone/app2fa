@@ -28,12 +28,53 @@ pub struct MigrationAccount {
 
 // ==================== 业务逻辑（无宏）=====================
 
+#[cfg(windows)]
+use windows::Win32::Security::Cryptography::*;
+
 fn get_data_path() -> std::path::PathBuf {
     let appdata = std::env::var("APPDATA").unwrap_or_else(|_| String::from("%APPDATA%"));
     let mut path = std::path::PathBuf::from(appdata);
     path.push("totp-manager");
     path.push("keys.bin");
     path
+}
+
+/// 使用 Windows DPAPI 加密数据
+#[cfg(windows)]
+fn encrypt_data(data: &[u8]) -> Result<Vec<u8>, String> {
+    unsafe {
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: data.len() as u32,
+            pbData: data.as_ptr() as *mut u8,
+        };
+        let mut output = CRYPT_INTEGER_BLOB::default();
+        if CryptProtectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut output).is_ok() {
+            let result = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+            let _ = windows::Win32::Foundation::LocalFree(windows::Win32::Foundation::HLOCAL(output.pbData as _));
+            Ok(result)
+        } else {
+            Err("加密失败".to_string())
+        }
+    }
+}
+
+/// 使用 Windows DPAPI 解密数据
+#[cfg(windows)]
+fn decrypt_data(data: &[u8]) -> Result<Vec<u8>, String> {
+    unsafe {
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: data.len() as u32,
+            pbData: data.as_ptr() as *mut u8,
+        };
+        let mut output = CRYPT_INTEGER_BLOB::default();
+        if CryptUnprotectData(&input, None, None, None, None, CRYPTPROTECT_UI_FORBIDDEN, &mut output).is_ok() {
+            let result = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+            let _ = windows::Win32::Foundation::LocalFree(windows::Win32::Foundation::HLOCAL(output.pbData as _));
+            Ok(result)
+        } else {
+            Err("解密失败".to_string())
+        }
+    }
 }
 
 /// 严格验证 Base32 字符串格式
@@ -59,8 +100,13 @@ fn validate_base32_strict(s: &str) -> Result<(), String> {
 fn load_accounts_impl() -> Result<Vec<Account>, String> {
     let path = get_data_path();
     if !path.exists() { return Ok(Vec::new()); }
-    let data = std::fs::read(&path).map_err(|e| format!("读取数据文件失败：{:?}", e))?;
-    let accounts: Vec<Account> = serde_json::from_slice(&data).map_err(|e| format!("解析数据失败：{:?}", e))?;
+
+    let encrypted_data = std::fs::read(&path).map_err(|e| format!("读取数据文件失败：{:?}", e))?;
+
+    // 尝试解密，如果失败则尝试作为明文 JSON 读取（兼容旧版本）
+    let json_data = decrypt_data(&encrypted_data).unwrap_or_else(|_| encrypted_data.clone());
+
+    let accounts: Vec<Account> = serde_json::from_slice(&json_data).map_err(|e| format!("解析数据失败：{:?}", e))?;
     Ok(accounts.into_iter().filter(|a| {
         !a.secret.is_empty() && a.secret.len() >= 8
     }).collect())
@@ -71,8 +117,12 @@ fn save_accounts_impl(accounts: Vec<Account>) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| format!("创建目录失败：{:?}", e))?;
     }
+
     let json = serde_json::to_vec(&accounts).map_err(|e| format!("数据序列化失败：{:?}", e))?;
-    std::fs::write(&path, &json).map_err(|e| format!("写入数据文件失败：{:?}", e))
+
+    // 加密后保存
+    let encrypted = encrypt_data(&json)?;
+    std::fs::write(&path, &encrypted).map_err(|e| format!("写入数据文件失败：{:?}", e))
 }
 
 fn generate_totp_impl(secret: String) -> Result<TOTPResult, String> {
