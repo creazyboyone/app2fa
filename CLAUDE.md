@@ -4,37 +4,58 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**TOTP Manager** — a Windows-only 2FA TOTP key manager built with Tauri 2 (Rust backend + vanilla JS frontend). Data is stored as JSON in `%APPDATA%/totp-manager/keys.bin`.
+**TOTP Manager** — a Windows-only 2FA TOTP key manager built with Tauri 2 (Rust backend + vanilla JS frontend). Data is encrypted with Windows DPAPI and stored in `%APPDATA%/totp-manager/keys.bin`.
 
 ## Architecture
 
-- **`src/main.rs`** — Single-file Rust backend. Contains all data models (`Account`, `TOTPResult`), business logic functions (`*_impl`), and Tauri command wrappers (`#[tauri::command]`). No modular separation currently.
-- **`dist/`** — Frontend: `index.html` (UI + jsQR CDN), `app.js` (vanilla JS state management, Tauri invoke calls, DOM rendering), `styles.css`.
-- **`src/tauri/capabilities/default.json`** — Tauri permissions for the main window.
+### Backend (Rust)
 
-Key dependencies: `otpauth` (TOTP generation), `rxing` (Windows Hello), `image` (QR parsing, stub), `zeroize` (secret zeroization).
+```
+src/
+├── main.rs        # 应用入口、系统托盘初始化
+├── models.rs      # 数据结构：Account, TotpResult, MigrationAccount
+├── crypto.rs      # Windows DPAPI 加解密
+├── totp.rs        # TOTP 生成与 Base32 验证
+├── storage.rs     # 账户存储（加载/保存/删除）
+├── migration.rs   # Google Authenticator 迁移解析、otpauth URI 解析、QR 图片解析
+└── commands.rs    # Tauri 命令封装
+```
+
+### Frontend (vanilla JS)
+
+- `dist/index.html` — UI 结构，jsQR CDN 引入
+- `dist/app.js` — 状态管理、Tauri invoke 调用、DOM 渲染
+- `dist/styles.css` — Tokyo Night 主题样式
+
+### Tauri 配置
+
+- `src/tauri/capabilities/default.json` — 窗口权限配置
+- `tauri.conf.json` — 应用配置（窗口尺寸 560px，禁止最大化）
 
 ## Commands
 
 ```bash
-# Build and run the app in development mode
-npx tauri dev
+# 开发模式
+cargo tauri dev
 
-# Build for production (creates NSIS installer + APPX)
-npx tauri build
+# 生产构建（生成 NSIS 安装包 + APPX）
+cargo tauri build
 ```
 
-No test suite exists. No linter or formatter is configured beyond Rust's built-in `cargo check`.
+## Key Dependencies
 
-## Pending / TODOs
+- `otpauth` — TOTP 算法实现
+- `rxing` — QR 码识别（后端图片解析）
+- `image` — 图片加载
+- `base32` — Base32 编码
+- `windows` — Windows DPAPI 加密
 
-- **手动导入准确性验证** — 待验证：手动输入密钥后生成的 TOTP 码是否与官方 authenticator app（Google Authenticator、Microsoft Authenticator）一致。需要对比测试多个常见 issuer（GitHub、Google、Microsoft 等）。
-- **图片导入功能** — 下一步实现。当前 `parse_qr_image` 命令为 stub，返回"开发中"提示。
+## Implementation Details
 
-## Key Implementation Details
-
-- All Tauri commands are in `src/main.rs` — both the `*_impl` functions and their `#[tauri::command]` wrappers.
-- Frontend uses a custom `invoke` binding to `window.__TAURI__.core.invoke` (Tauri 2 API). Commands called: `load_accounts`, `save_accounts`, `generate_totp`, `add_account`, `delete_account`, `parse_otpauth_uri`, `verify_windows_hello`, `parse_qr_image`.
-- TOTP codes refresh every 1 second on the frontend via `setInterval`, calling `generate_totp` backend command.
-- QR scanning uses jsQR (loaded from CDN) to scan camera frames — no backend involvement.
-- The `skip-windows-hello` feature flag exists but Windows Hello verification is currently stubbed out (`verify_windows_hello` always returns `true`).
+- **数据加密**：使用 Windows DPAPI 的 `CryptProtectData`/`CryptUnprotectData`，绑定当前 Windows 用户
+- **TOTP 刷新**：前端每秒通过 `setInterval` 调用 `generate_totp`
+- **QR 扫描**：
+  - 摄像头：前端 jsQR 库
+  - 图片：后端 rxing 库
+- **Google Authenticator 迁移**：手动解析 protobuf 格式的 `otpauth-migration://` URI
+- **系统托盘**：复制验证码后最小化，点击托盘图标恢复窗口
