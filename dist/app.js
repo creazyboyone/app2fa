@@ -146,9 +146,12 @@ async function copyTOTP(element) {
 
     try {
         await invoke('copy_to_clipboard', { text: rawCode });
-        showToast("✓ 已复制", 1500);
+        // 显示系统通知
+        await invoke('show_notification', { title: "2FA Manager", body: "验证码已复制到剪贴板，已最小化到托盘" });
+        // 最小化到托盘
+        await invoke('minimize_to_tray');
     } catch (e) {
-        showToast("复制失败: " + e.message, 2000);
+        console.error('Error:', e);
     }
 }
 

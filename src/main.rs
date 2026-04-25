@@ -1,6 +1,7 @@
 // ==================== 数据结构定义 ====================
 
 use serde::{Deserialize, Serialize};
+use tauri::Manager;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Account {
@@ -383,13 +384,34 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             load_accounts, save_accounts, generate_totp, parse_qr_image,
             add_account, delete_account, parse_otpauth_uri, verify_windows_hello,
-            decode_migration_payload, copy_to_clipboard,
+            decode_migration_payload, copy_to_clipboard, minimize_to_tray, show_notification,
         ])
-        .setup(|_app| {
+        .setup(|app| {
             println!("TOTP Manager 启动");
+
+            // 创建系统托盘
+            let tray = tauri::tray::TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .tooltip("2FA Manager - 点击打开")
+                .on_tray_icon_event(|tray, event| {
+                    if let tauri::tray::TrayIconEvent::Click { .. } = event {
+                        let app = tray.app_handle();
+                        if let Some(window) = app.get_webview_window("main") {
+                            let _ = window.show();
+                            let _ = window.set_focus();
+                        }
+                    }
+                })
+                .build(app);
+
+            if let Err(e) = tray {
+                eprintln!("创建系统托盘失败: {:?}", e);
+            }
+
             Ok(())
         })
         .run(tauri::generate_context!())
@@ -448,4 +470,23 @@ fn decode_migration_payload(b64_data: String) -> Result<Vec<MigrationAccount>, S
 async fn copy_to_clipboard(app: tauri::AppHandle, text: String) -> Result<(), String> {
     use tauri_plugin_clipboard_manager::ClipboardExt;
     app.clipboard().write_text(&text).map_err(|e| format!("复制失败：{:?}", e))
+}
+
+#[tauri::command]
+async fn minimize_to_tray(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("main") {
+        window.hide().map_err(|e| format!("隐藏窗口失败：{:?}", e))?;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+async fn show_notification(app: tauri::AppHandle, title: String, body: String) -> Result<(), String> {
+    use tauri_plugin_notification::NotificationExt;
+    app.notification()
+        .builder()
+        .title(&title)
+        .body(&body)
+        .show()
+        .map_err(|e| format!("通知失败：{:?}", e))
 }
