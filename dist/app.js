@@ -77,13 +77,18 @@ function renderAccountList() {
                 ${account.issuer ? `<div class="account-issuer">${escapeHtml(account.issuer)}</div>` : ''}
                 <div class="account-name">${escapeHtml(account.name)}</div>
             </div>
-            <div class="account-totp" data-secret="${account.secret}" onclick="copyTOTP(this)">
+            <div class="account-totp" data-secret="${account.secret}">
                 <span class="totp-progress"></span>
                 <span class="totp-text">------</span>
             </div>
             <button class="delete-btn" title="删除">×</button>
         </div>
     `).join('');
+
+    // 为 TOTP 元素绑定点击事件
+    container.querySelectorAll('.account-totp').forEach(el => {
+        el.addEventListener('click', () => copyTOTP(el));
+    });
 
     // 滚动条显示/隐藏
     let scrollTimeout;
@@ -155,8 +160,6 @@ async function copyTOTP(element) {
     }
 }
 
-// 暴露到全局作用域
-window.copyTOTP = copyTOTP;
 
 function showToast(message, duration = 1500) {
     const toast = document.getElementById('copyToast');
@@ -168,21 +171,27 @@ function showToast(message, duration = 1500) {
 
 // ==================== 添加账户 ====================
 
-window.showAddAccount = function() {
+function showAddAccount() {
     const mainView = document.getElementById('mainView');
     const addAccountView = document.getElementById('addAccountView');
     if (mainView) mainView.classList.add('hidden');
     if (addAccountView) addAccountView.classList.remove('hidden');
     selectTab('manual');
-};
+}
 
-window.showMain = function() {
+function showMain() {
     const addAccountView = document.getElementById('addAccountView');
     const mainView = document.getElementById('mainView');
     if (addAccountView) addAccountView.classList.add('hidden');
     if (mainView) mainView.classList.remove('hidden');
     stopCamera();
-};
+}
+
+// 绑定按钮事件
+document.getElementById('btnAddAccount')?.addEventListener('click', showAddAccount);
+document.getElementById('btnCloseAddAccount')?.addEventListener('click', showMain);
+document.getElementById('btnStartCamera')?.addEventListener('click', startCamera);
+document.getElementById('btnCloseApp')?.addEventListener('click', () => window.close());
 
 const tabs = document.querySelectorAll('.tab');
 tabs.forEach(tab => {

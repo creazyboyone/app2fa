@@ -19,7 +19,7 @@
                 <h2>⚠️ Windows Hello 未配置</h2>
                 <p>无法找到可用的 Windows Hello 验证方式。</p>
                 <p>请确保已设置 PIN、指纹或面部识别，然后重新运行程序。</p>
-                <button onclick="window.close()" class="btn-close">退出程序</button>
+                <button id="btnCloseApp" class="btn-close">退出程序</button>
             </div>
         </div>
 
@@ -27,7 +27,7 @@
         <main id="mainView">
             <header class="app-header">
                 <h1>🔐 2FA Key Manager</h1>
-                <button onclick="showAddAccount()" class="btn-add" title="添加账户">+</button>
+                <button id="btnAddAccount" class="btn-add" title="添加账户">+</button>
             </header>
 
             <div id="accountList" class="account-list"></div>
@@ -37,7 +37,7 @@
         <section id="addAccountView" class="view hidden">
             <header class="section-header">
                 <h2>添加新账户</h2>
-                <button onclick="showMain()" class="btn-close-circle">×</button>
+                <button id="btnCloseAddAccount" class="btn-close-circle">×</button>
             </header>
 
             <div class="tabs">
@@ -76,7 +76,7 @@
             <div id="cameraForm" class="tab-content hidden">
                 <video id="cameraVideo" autoplay playsinline muted></video>
                 <canvas id="qrCanvas" style="display:none;"></canvas>
-                <button onclick="startCamera()" class="btn-primary">开启摄像头</button>
+                <button id="btnStartCamera" class="btn-primary">开启摄像头</button>
             </div>
 
             <!-- 错误提示 -->
