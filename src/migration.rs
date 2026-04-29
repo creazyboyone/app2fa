@@ -91,6 +91,9 @@ pub fn parse_otpauth_uri(uri: &str) -> Result<Account, String> {
         name: name.to_string(),
         issuer,
         secret: cleaned_secret,
+        pinned: false,
+        usage_count: 0,
+        last_used_at: None,
     })
 }
 

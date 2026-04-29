@@ -53,5 +53,8 @@ pub fn create_account(name: String, issuer: Option<String>, secret: String) -> R
         name,
         issuer,
         secret: cleaned_secret,
+        pinned: false,
+        usage_count: 0,
+        last_used_at: None,
     })
 }

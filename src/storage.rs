@@ -48,3 +48,31 @@ pub fn delete_account(id: &str) -> Result<(), String> {
     }
     save_accounts(accounts)
 }
+
+/// 更新账户使用记录
+pub fn update_usage(id: &str) -> Result<(), String> {
+    let mut accounts = load_accounts()?;
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("获取时间失败：{:?}", e))?
+        .as_secs();
+
+    if let Some(account) = accounts.iter_mut().find(|a| a.id == id) {
+        account.usage_count = account.usage_count.saturating_add(1);
+        account.last_used_at = Some(now);
+        save_accounts(accounts)
+    } else {
+        Err(format!("账户不存在：{}", id))
+    }
+}
+
+/// 切换置顶状态
+pub fn toggle_pin(id: &str) -> Result<(), String> {
+    let mut accounts = load_accounts()?;
+    if let Some(account) = accounts.iter_mut().find(|a| a.id == id) {
+        account.pinned = !account.pinned;
+        save_accounts(accounts)
+    } else {
+        Err(format!("账户不存在：{}", id))
+    }
+}

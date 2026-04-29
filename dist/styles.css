@@ -163,6 +163,7 @@ body {
 }
 
 .account-card {
+    position: relative;
     background-color: #24283b;
     border-radius: 12px;
     padding: 20px;
@@ -260,6 +261,40 @@ body {
     background: rgba(247, 118, 142, 0.2);
     color: #f7768e;
     opacity: 1;
+}
+
+/* Pin button */
+.pin-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    font-size: 0.9rem;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+    opacity: 0.3;
+    transition: all 0.2s;
+    padding: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.pin-btn:hover {
+    opacity: 0.7;
+    transform: scale(1.1);
+}
+
+.pin-btn.pinned {
+    opacity: 1;
+}
+
+.account-card.pinned {
+    border: 1px solid #7aa2f7;
+    box-shadow: 0 0 8px rgba(122, 162, 247, 0.2);
 }
 
 /* Views */

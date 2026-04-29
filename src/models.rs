@@ -7,6 +7,15 @@ pub struct Account {
     pub name: String,
     pub issuer: Option<String>,
     pub secret: String,
+    /// 置顶
+    #[serde(default)]
+    pub pinned: bool,
+    /// 使用次数
+    #[serde(default)]
+    pub usage_count: u32,
+    /// 最后使用时间 (Unix 时间戳，秒)
+    #[serde(default)]
+    pub last_used_at: Option<u64>,
 }
 
 /// TOTP 生成结果

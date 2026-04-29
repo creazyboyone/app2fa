@@ -1,5 +1,8 @@
 //! TOTP Manager - Windows 2FA Key Manager
 
+// 在 release 模式下隐藏控制台窗口
+#![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
+
 mod commands;
 mod crypto;
 mod migration;
@@ -27,6 +30,8 @@ fn main() {
             commands::copy_to_clipboard,
             commands::minimize_to_tray,
             commands::show_notification,
+            commands::update_account_usage,
+            commands::toggle_pin,
         ])
         .setup(|app| {
             // 创建系统托盘

@@ -57,10 +57,26 @@ async function loadAndRenderAccounts() {
     try {
         let loadedAccounts = await invoke('load_accounts');
         accounts = loadedAccounts.filter(a => a && a.secret && a.secret.length >= 8);
+        sortAccounts();
         renderAccountList();
     } catch (error) {
         alert("无法加载账户列表：" + error.message);
     }
+}
+
+function sortAccounts() {
+    accounts.sort((a, b) => {
+        // 置顶优先
+        if (a.pinned !== b.pinned) return b.pinned ? 1 : -1;
+        // 使用次数多的优先
+        if ((b.usage_count || 0) !== (a.usage_count || 0)) {
+            return (b.usage_count || 0) - (a.usage_count || 0);
+        }
+        // 最近使用的优先
+        const aTime = a.last_used_at || 0;
+        const bTime = b.last_used_at || 0;
+        return bTime - aTime;
+    });
 }
 
 function renderAccountList() {
@@ -72,7 +88,8 @@ function renderAccountList() {
     }
 
     container.innerHTML = accounts.map(account => `
-        <div class="account-card" data-id="${account.id}">
+        <div class="account-card${account.pinned ? ' pinned' : ''}" data-id="${account.id}">
+            <button class="pin-btn${account.pinned ? ' pinned' : ''}" title="${account.pinned ? '取消置顶' : '置顶'}">📌</button>
             <div class="account-info">
                 ${account.issuer ? `<div class="account-issuer">${escapeHtml(account.issuer)}</div>` : ''}
                 <div class="account-name">${escapeHtml(account.name)}</div>
@@ -148,9 +165,23 @@ async function refreshSingleTOTP(account, element) {
 
 async function copyTOTP(element) {
     const rawCode = element.title || element.querySelector('.totp-text')?.textContent || '';
+    const card = element.closest('.account-card');
+    const accountId = card?.dataset.id;
 
     try {
         await invoke('copy_to_clipboard', { text: rawCode });
+        // 更新使用记录
+        if (accountId) {
+            try {
+                await invoke('update_account_usage', { id: accountId });
+                // 更新本地账户数据
+                const account = accounts.find(a => a.id === accountId);
+                if (account) {
+                    account.usage_count = (account.usage_count || 0) + 1;
+                    account.last_used_at = Math.floor(Date.now() / 1000);
+                }
+            } catch (e) {}
+        }
         // 显示系统通知
         await invoke('show_notification', { title: "2FA Manager", body: "验证码已复制到剪贴板，已最小化到托盘" });
         // 最小化到托盘
@@ -509,6 +540,27 @@ async function processScannedQR(data) {
 // ==================== 删除账户 ====================
 
 document.addEventListener('click', async (e) => {
+    // 置顶按钮
+    if (e.target.classList.contains('pin-btn')) {
+        const card = e.target.closest('.account-card');
+        const id = card?.dataset.id;
+        if (!id) return;
+
+        try {
+            await invoke('toggle_pin', { id });
+            const account = accounts.find(a => a.id === id);
+            if (account) {
+                account.pinned = !account.pinned;
+            }
+            sortAccounts();
+            renderAccountList();
+        } catch (error) {
+            alert("操作失败：" + error.message);
+        }
+        return;
+    }
+
+    // 删除按钮
     if (e.target.classList.contains('delete-btn')) {
         const card = e.target.closest('.account-card');
         const id = card.dataset.id;

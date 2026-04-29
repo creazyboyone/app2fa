@@ -32,6 +32,16 @@ pub fn delete_account(id: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+pub fn update_account_usage(id: String) -> Result<(), String> {
+    storage::update_usage(&id)
+}
+
+#[tauri::command]
+pub fn toggle_pin(id: String) -> Result<(), String> {
+    storage::toggle_pin(&id)
+}
+
+#[tauri::command]
 pub fn parse_otpauth_uri(uri: String) -> Result<Account, String> {
     migration::parse_otpauth_uri(&uri)
 }
